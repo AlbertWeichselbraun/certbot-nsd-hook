@@ -41,9 +41,9 @@ def get_zonefile(domain):
                 continue
 
             if 'name:' in line:
-                zone_name = line.split('name:')[1].strip()
+                zone_name = line.split('name:')[1].strip().replace('"','')
             elif 'zonefile:' in line:
-                zone_file = line.split('zonefile:')[1].strip()
+                zone_file = line.split('zonefile:')[1].strip().replace('"','')
 
         if zone_name and zone_file:
             zones[zone_name] = zone_file
@@ -60,13 +60,18 @@ def update_domain(domain, zonefile, secret):
     zone = dns.zone.from_file(zonefile, domain)
 
     # updata soa serial
-    for (_, _, rdata) in zone.iterate_rdatas(SOA):
-        rdata.serial += 1
+    for soa in zone.iterate_rdatasets(rdtype='SOA'):
+        soa_name, soa_rdataset = soa
+    for rdata in soa_rdataset.processing_order():
+        soa_rdataset.add(rdata.replace(serial=rdata.serial + 1))
 
     # update the acme challenge
-    acme_record = zone.find_rdataset('_acme-challenge', rdtype=TXT)
-    for rdata in acme_record:
-        rdata.strings = [secret.encode("utf8")]
+    acme_rdataset = zone.find_rdataset('_acme-challenge', rdtype=TXT)
+    for rdata in acme_rdataset.processing_order():
+        new_acme_rdata = rdata.replace(strings=[secret.encode("utf8")])
+    zone.delete_rdataset('_acme-challenge', rdtype=TXT)
+    new_acme_rdataset = zone.find_rdataset('_acme-challenge', rdtype=TXT, create=True)
+    new_acme_rdataset.add(new_acme_rdata, ttl=acme_rdataset.ttl)
 
     zone.to_file(zonefile)
 
